@@ -34,6 +34,10 @@ Audits query planner customizations across all databases and collections, report
 
 Scans recent change-stream write activity and identifies documents that are hot enough to plausibly explain high applier spread disparity. The script applies a spread-disparity threshold plus per-document and total-window changes-per-second gates to reduce low-traffic false positives. For full documentation and examples, see [hotDocSpreadCheck README](hotDocSpreadCheck/README.md).
 
+## [Index Format Validation](indexFormatValidation)
+
+Checks unique non-`_id_` indexes across all non-system databases for WiredTiger index format versions below 13, which may indicate indexes created on MongoDB versions earlier than 4.2 and needing review before migration. For full documentation and examples, see [indexFormatValidation README](indexFormatValidation/README.md).
+
 ### License
 
 [Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0)
