@@ -45,17 +45,29 @@ Each finding includes:
 - `indexName`
 - `key`
 - `formatVersions`
+- `unknownLocations`
 - `status`
 - `suggestedValidateCommand` (only for suspicious findings)
 - `advisory` (only for suspicious findings)
 
-For sharded collections, `formatVersions` may contain one entry per shard.
+For sharded collections, `formatVersions` contains one entry per shard that reported a parseable version, and `unknownLocations` lists the shards that did not.
 
 Statuses:
 
 - `POTENTIALLY_PRE_42_UNIQUE_INDEX`: unique index has `formatVersion` lower than `13`
-- `UNKNOWN_FORMAT_VERSION`: unique index is missing a parseable `formatVersion`
-- `VALID`: unique index has `formatVersion` `13` or newer, shown only when `_showAll=true`
+- `UNKNOWN_FORMAT_VERSION`: unique index is missing a parseable `formatVersion` in at least one location
+- `VALID`: unique index has `formatVersion` `13` or newer in every location, shown only when `_showAll=true`
+
+On sharded clusters, `UNKNOWN_FORMAT_VERSION` for a subset of shards is often benign: the index may still be building, or the shard may report no index details. Use `unknownLocations` to identify which shards to re-check.
+
+Each entry in `errors` includes:
+
+- `scope`: `cluster`, `database`, or `collection`
+- `db` (not present for `cluster` scope)
+- `collection` and `namespace` (only for `collection` scope)
+- `error`
+
+Collections without unique non-`_id_` indexes are skipped before `collStats` runs, so permission errors on those namespaces are not reported.
 
 When a suspicious index is found, the `advisory` field is included with guidance to run `validate` as a secondary check. The old unique-index-format warning from `validate` is available starting in MongoDB 6.0; on older versions, `validate` may return no warning even when risk remains. `validate` is resource consuming and should be used with caution.
 

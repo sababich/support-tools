@@ -97,11 +97,7 @@ if (typeof _showAll === "undefined") {
 
     function getFormatVersions(stats, indexName) {
         var versions = {};
-
-        var topLevelVersion = getFormatVersion(findIndexDetail(stats.indexDetails, indexName));
-        if (topLevelVersion !== null) {
-            versions.default = topLevelVersion;
-        }
+        var unknownLocations = [];
 
         if (stats.shards) {
             for (var shardName in stats.shards) {
@@ -109,30 +105,48 @@ if (typeof _showAll === "undefined") {
                     var shardStats = stats.shards[shardName];
                     var shardVersion = getFormatVersion(findIndexDetail(shardStats.indexDetails, indexName));
 
-                    if (shardVersion !== null) {
+                    if (shardVersion === null) {
+                        unknownLocations.push(shardName);
+                    } else {
                         versions[shardName] = shardVersion;
                     }
                 }
             }
+        } else {
+            var topLevelVersion = getFormatVersion(findIndexDetail(stats.indexDetails, indexName));
+
+            if (topLevelVersion === null) {
+                unknownLocations.push("default");
+            } else {
+                versions.default = topLevelVersion;
+            }
         }
 
-        return versions;
+        return {
+            versions: versions,
+            unknownLocations: unknownLocations
+        };
     }
 
-    function classifyFormatVersions(formatVersions) {
-        var versionValues = Object.keys(formatVersions).map(function (location) {
-            return formatVersions[location];
+    function classifyFormatVersions(versions, unknownLocations) {
+        var versionValues = Object.keys(versions).map(function (location) {
+            return versions[location];
         });
 
-        if (versionValues.length === 0) {
+        var hasLegacyVersion = versionValues.some(function (version) {
+            return typeof version === "number" && version < MIN_SAFE_FORMAT_VERSION;
+        });
+
+        // A confirmed legacy location outranks an unknown one: the advisory is the same either way.
+        if (hasLegacyVersion) {
+            return "POTENTIALLY_PRE_42_UNIQUE_INDEX";
+        }
+
+        if (unknownLocations.length || versionValues.length === 0) {
             return "UNKNOWN_FORMAT_VERSION";
         }
 
-        var hasLegacyVersion = versionValues.some(function (version) {
-            return version < MIN_SAFE_FORMAT_VERSION;
-        });
-
-        return hasLegacyVersion ? "POTENTIALLY_PRE_42_UNIQUE_INDEX" : "VALID";
+        return "VALID";
     }
 
     function getAdvisory(status) {
@@ -148,8 +162,15 @@ if (typeof _showAll === "undefined") {
     }
 
     function buildSuggestedValidateCommand(databaseName, collectionName) {
+        // Namespaces may contain newlines, which would break out of the quoted literal when pasted into mongosh.
         function escapeSingleQuotedLiteral(value) {
-            return String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+            return String(value)
+                .replace(/\\/g, "\\\\")
+                .replace(/'/g, "\\'")
+                .replace(/\n/g, "\\n")
+                .replace(/\r/g, "\\r")
+                .replace(/\u2028/g, "\\u2028")
+                .replace(/\u2029/g, "\\u2029");
         }
 
         var safeDatabaseName = escapeSingleQuotedLiteral(databaseName);
@@ -158,17 +179,14 @@ if (typeof _showAll === "undefined") {
         return "db.getSiblingDB('" + safeDatabaseName + "').getCollection('" + safeCollectionName + "').validate({full:true}).warnings";
     }
 
+    function isCandidateIndex(indexSpec) {
+        return indexSpec.unique === true && indexSpec.name !== "_id_";
+    }
+
+    // Callers must pre-filter index specs with isCandidateIndex.
     function validateIndex(databaseName, collectionName, indexSpec, stats) {
-        if (indexSpec.name === "_id_") {
-            return null;
-        }
-
-        if (indexSpec.unique !== true) {
-            return null;
-        }
-
         var formatVersions = getFormatVersions(stats, indexSpec.name);
-        var status = classifyFormatVersions(formatVersions);
+        var status = classifyFormatVersions(formatVersions.versions, formatVersions.unknownLocations);
 
         var advisory = getAdvisory(status);
         var result = {
@@ -177,7 +195,8 @@ if (typeof _showAll === "undefined") {
             namespace: databaseName + "." + collectionName,
             indexName: indexSpec.name || "<unnamed>",
             key: indexSpec.key || "<unknown key pattern>",
-            formatVersions: Object.keys(formatVersions).length ? formatVersions : "unknown",
+            formatVersions: formatVersions.versions,
+            unknownLocations: formatVersions.unknownLocations,
             status: status
         };
 
@@ -206,31 +225,56 @@ if (typeof _showAll === "undefined") {
         var errors = [];
         var databases = getUserDatabases();
 
+        function recordError(databaseName, collectionName, e) {
+            var error = {
+                scope: collectionName ? "collection" : "database",
+                db: databaseName,
+                error: e.message
+            };
+
+            if (collectionName) {
+                error.collection = collectionName;
+                error.namespace = databaseName + "." + collectionName;
+            }
+
+            errors.push(error);
+        }
+
         databases.forEach(function (databaseInfo) {
             var currentDb = db.getSiblingDB(databaseInfo.name);
+            var collectionNames;
 
-            getCollectionNames(currentDb).forEach(function (collectionName) {
-                var currentCollection = currentDb.getCollection(collectionName);
+            try {
+                collectionNames = getCollectionNames(currentDb);
+            } catch (e) {
+                recordError(databaseInfo.name, null, e);
+                return;
+            }
+
+            collectionNames.forEach(function (collectionName) {
+                var candidateIndexes;
                 var stats;
+
+                try {
+                    candidateIndexes = currentDb.getCollection(collectionName).getIndexes().filter(isCandidateIndex);
+                } catch (e) {
+                    recordError(databaseInfo.name, collectionName, e);
+                    return;
+                }
+
+                if (!candidateIndexes.length) {
+                    return;
+                }
 
                 try {
                     stats = getIndexDetails(currentDb, collectionName);
                 } catch (e) {
-                    errors.push({
-                        db: databaseInfo.name,
-                        collection: collectionName,
-                        namespace: databaseInfo.name + "." + collectionName,
-                        error: e.message
-                    });
+                    recordError(databaseInfo.name, collectionName, e);
                     return;
                 }
 
-                currentCollection.getIndexes().forEach(function (indexSpec) {
-                    var result = validateIndex(databaseInfo.name, collectionName, indexSpec, stats);
-
-                    if (result) {
-                        results.push(result);
-                    }
+                candidateIndexes.forEach(function (indexSpec) {
+                    results.push(validateIndex(databaseInfo.name, collectionName, indexSpec, stats));
                 });
             });
         });
