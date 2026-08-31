@@ -69,9 +69,10 @@ if (typeof _showAll === "undefined") {
 
     function getCollectionNames(database) {
         var collectionNames = [];
+        var nameOnly = true;
+        var authorizedCollections = true;
 
-        // Positional args: filter, nameOnly, authorizedCollections. The last one lets scoped users list what they can read.
-        database.getCollectionInfos({}, true, true).forEach(function (collectionInfo) {
+        database.getCollectionInfos({}, nameOnly, authorizedCollections).forEach(function (collectionInfo) {
             // listCollections restricts filters to "name" for unprivileged users, so filter by type here.
             if (collectionInfo.type && collectionInfo.type !== "collection") {
                 return;
