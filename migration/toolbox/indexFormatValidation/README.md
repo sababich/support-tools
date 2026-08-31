@@ -6,6 +6,8 @@ The checker assumes unique indexes with a WiredTiger index `formatVersion` below
 
 ## Usage
 
+Requires `mongosh` and MongoDB 4.0 or newer.
+
 ```bash
 mongosh "<connection-string>" indexFormatValidation.js
 ```
@@ -28,12 +30,14 @@ Exit codes:
 
 The script reads directly from the connected deployment using:
 
-- `listDatabases` to find databases
-- `getCollectionInfos({ type: "collection" }, { nameOnly: true })` to find collections
+- `listDatabases` with `nameOnly: true` to find databases
+- `getCollectionInfos({}, true, true)` to find collections
 - `getIndexes()` to find unique index specs
 - `collStats` with `indexDetails: true` to read WiredTiger index metadata
 
-System databases `admin`, `config`, and `local` are skipped. Collections whose names start with `system.` are also skipped.
+System databases `admin`, `config`, and `local` are skipped, along with views, timeseries collections (which cannot have unique indexes), and collections whose names start with `system.`.
+
+Collections are listed with `authorizedCollections: true`, so a user without cluster-wide `listCollections` privileges still gets a scan across the collections they are authorized to read. That mode restricts server-side filters to `name`, so the collection type is filtered client-side.
 
 The script checks `formatVersion` or `metadata.formatVersion` from the `collStats` index details. Plain `db.collection.getIndexes()` output is not sufficient by itself because its `v` field is the index spec version, not the WiredTiger `formatVersion` checked by this script.
 
@@ -67,9 +71,11 @@ Each entry in `errors` includes:
 - `collection` and `namespace` (only for `collection` scope)
 - `error`
 
+For a failed command, `error` reads `<command> failed: <errmsg> (<codeName or code>)` using the fields the server returned. A `listDatabases` call that succeeds but returns an unexpected payload is reported separately as `listDatabases returned an unexpected response shape`.
+
 Collections without unique non-`_id_` indexes are skipped before `collStats` runs, so permission errors on those namespaces are not reported.
 
-When a suspicious index is found, the `advisory` field is included with guidance to run `validate` as a secondary check. The old unique-index-format warning from `validate` is available starting in MongoDB 6.0; on older versions, `validate` may return no warning even when risk remains. `validate` is resource consuming and should be used with caution.
+When a suspicious index is found, the `advisory` field is included with guidance to run `validate` as a secondary check. The old unique-index-format warning from `validate` is available starting in MongoDB 6.0; on older versions, `validate` may return no warning even when the risk remains. Because `validate` obtains an exclusive lock on the collection, it blocks reads and writes until it completes; when run on a secondary, it may block other operations on that secondary. It is resource-intensive, so run it with caution.
 
 The `suggestedValidateCommand` field includes a ready-to-run sample in this format:
 

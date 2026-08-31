@@ -8,8 +8,8 @@ var PROBLEM_STATUSES = [
 ];
 var EXIT_CODE_WITH_FINDINGS = 1;
 var EXIT_CODE_WITH_ERRORS = 2;
-var LEGACY_INDEX_ADVISORY = "This index may have been created before MongoDB 4.2 and as a result may still use a legacy unique-index key format. Use validate as a secondary check, but note that the old-format warning is available starting in MongoDB 6.0. On versions below 6.0, validate may return no warning even when risk remains. Validate is resource consuming, so run it with caution.";
-var UNKNOWN_VERSION_ADVISORY = "Unable to determine the index format version from collStats index details. Use validate as a secondary check, but note that the old-format warning is available starting in MongoDB 6.0. On versions below 6.0, validate may return no warning even when risk remains. Validate is resource consuming, so run it with caution.";
+var LEGACY_INDEX_ADVISORY = "This index may have been created before MongoDB 4.2 and may still use a legacy unique-index key format. Use `validate` as a secondary check, but note that the old-format warning is available starting in MongoDB 6.0. On versions below 6.0, `validate` may return no warning even when the risk remains. Because `validate` obtains an exclusive lock on the collection, it blocks reads and writes until it completes; when run on a secondary, it may block other operations on that secondary. It is resource-intensive, so run it with caution.";
+var UNKNOWN_VERSION_ADVISORY = "Unable to determine the index format version from collStats index details. Use `validate` as a secondary check, but note that the old-format warning is available starting in MongoDB 6.0. On versions below 6.0, `validate` may return no warning even when the risk remains. Because `validate` obtains an exclusive lock on the collection, it blocks reads and writes until it completes; when run on a secondary, it may block other operations on that secondary. It is resource-intensive, so run it with caution.";
 
 if (typeof _showAll === "undefined") {
     var _showAll = false;
@@ -22,9 +22,30 @@ if (typeof _showAll === "undefined") {
         return PROBLEM_STATUSES.indexOf(status) !== -1;
     }
 
+    function formatCommandError(label, response) {
+        var detail = response && (response.codeName || response.code);
+
+        return label + " failed: " + ((response && response.errmsg) || "unknown error") +
+            (detail ? " (" + detail + ")" : "");
+    }
+
     function getFormatVersionFromValue(value) {
+        // Dates coerce to an epoch-millisecond integer, so reject them before any numeric conversion.
+        if (Object.prototype.toString.call(value) === "[object Date]") {
+            return null;
+        }
+
+        // Handles both Extended JSON wrappers and mongosh BSON numeric types.
         if (value && typeof value === "object") {
-            value = value.$numberInt || value.$numberLong || value.$numberDouble;
+            if (value.$numberInt !== undefined) {
+                value = value.$numberInt;
+            } else if (value.$numberLong !== undefined) {
+                value = value.$numberLong;
+            } else if (value.$numberDouble !== undefined) {
+                value = value.$numberDouble;
+            } else if (typeof value.toNumber === "function") {
+                value = value.toNumber();
+            }
         }
 
         var version = Number(value);
@@ -39,7 +60,7 @@ if (typeof _showAll === "undefined") {
 
         var value = indexDetail.formatVersion;
 
-        if (value === undefined && indexDetail.metadata) {
+        if ((value === undefined || value === null) && indexDetail.metadata) {
             value = indexDetail.metadata.formatVersion;
         }
 
@@ -49,7 +70,13 @@ if (typeof _showAll === "undefined") {
     function getCollectionNames(database) {
         var collectionNames = [];
 
-        database.getCollectionInfos({ type: "collection" }, { nameOnly: true }).forEach(function (collectionInfo) {
+        // Positional args: filter, nameOnly, authorizedCollections. The last one lets scoped users list what they can read.
+        database.getCollectionInfos({}, true, true).forEach(function (collectionInfo) {
+            // listCollections restricts filters to "name" for unprivileged users, so filter by type here.
+            if (collectionInfo.type && collectionInfo.type !== "collection") {
+                return;
+            }
+
             if (collectionInfo.name.indexOf("system.") === 0) {
                 return;
             }
@@ -66,8 +93,8 @@ if (typeof _showAll === "undefined") {
             indexDetails: true
         });
 
-        if (!stats.ok) {
-            throw new Error(EJSON.stringify(stats));
+        if (!stats || !stats.ok) {
+            throw new Error(formatCommandError("collStats", stats));
         }
 
         return stats;
@@ -78,7 +105,7 @@ if (typeof _showAll === "undefined") {
             return null;
         }
 
-        if (indexDetails[indexName]) {
+        if (Object.prototype.hasOwnProperty.call(indexDetails, indexName) && indexDetails[indexName]) {
             return indexDetails[indexName];
         }
 
@@ -209,10 +236,14 @@ if (typeof _showAll === "undefined") {
     }
 
     function getUserDatabases() {
-        var response = db.adminCommand("listDatabases");
+        var response = db.adminCommand({ listDatabases: 1, nameOnly: true });
 
-        if (!response || !response.ok || !Array.isArray(response.databases)) {
-            throw new Error("listDatabases failed: " + EJSON.stringify(response));
+        if (!response || !response.ok) {
+            throw new Error(formatCommandError("listDatabases", response));
+        }
+
+        if (!Array.isArray(response.databases)) {
+            throw new Error("listDatabases returned an unexpected response shape");
         }
 
         return response.databases.filter(function (databaseInfo) {
