@@ -31,7 +31,7 @@ Exit codes:
 The script reads directly from the connected deployment using:
 
 - `listDatabases` with `nameOnly: true` to find databases
-- `getCollectionInfos({}, nameOnly, authorizedCollections)` to find collections
+- `getCollectionInfos({}, { nameOnly: true, authorizedCollections: true })` to find collections
 - `getIndexes()` to find unique index specs
 - `collStats` with `indexDetails: true` to read WiredTiger index metadata
 

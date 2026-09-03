@@ -69,10 +69,11 @@ if (typeof _showAll === "undefined") {
 
     function getCollectionNames(database) {
         var collectionNames = [];
-        var nameOnly = true;
-        var authorizedCollections = true;
 
-        database.getCollectionInfos({}, nameOnly, authorizedCollections).forEach(function (collectionInfo) {
+        database.getCollectionInfos({}, {
+            nameOnly: true,
+            authorizedCollections: true
+        }).forEach(function (collectionInfo) {
             // listCollections restricts filters to "name" for unprivileged users, so filter by type here.
             if (collectionInfo.type && collectionInfo.type !== "collection") {
                 return;
