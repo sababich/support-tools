@@ -56,6 +56,8 @@ Each finding includes:
 
 For sharded collections, `formatVersions` contains one entry per shard that reported a parseable version, and `unknownLocations` lists the shards that did not.
 
+For standalone nodes and replica sets, `formatVersions.default` contains the reported version. If the version cannot be determined, `unknownLocations` contains `default`.
+
 Statuses:
 
 - `POTENTIALLY_PRE_42_UNIQUE_INDEX`: unique index has `formatVersion` lower than `13`
@@ -73,7 +75,7 @@ Each entry in `errors` includes:
 
 For a failed command, `error` reads `<command> failed: <errmsg> (<codeName or code>)` using the fields the server returned. A `listDatabases` call that succeeds but returns an unexpected payload is reported separately as `listDatabases returned an unexpected response shape`.
 
-Collections without unique non-`_id_` indexes are skipped before `collStats` runs, so permission errors on those namespaces are not reported.
+The script calls `getIndexes()` for every scanned collection. If a collection has no unique non-`_id_` indexes, `collStats` is not run for that collection, so `collStats` permission errors on those namespaces are not reported.
 
 When a suspicious index is found, the `advisory` field is included with guidance to run `validate` as a secondary check. The old unique-index-format warning from `validate` is available starting in MongoDB 6.0; on older versions, `validate` may return no warning even when the risk remains. Because `validate` obtains an exclusive lock on the collection, it blocks reads and writes until it completes; when run on a secondary, it may block other operations on that secondary. It is resource-intensive, so run it with caution.
 

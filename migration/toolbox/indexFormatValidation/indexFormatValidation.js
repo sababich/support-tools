@@ -8,8 +8,9 @@ var PROBLEM_STATUSES = [
 ];
 var EXIT_CODE_WITH_FINDINGS = 1;
 var EXIT_CODE_WITH_ERRORS = 2;
-var LEGACY_INDEX_ADVISORY = "This index may have been created before MongoDB 4.2 and may still use a legacy unique-index key format. Use `validate` as a secondary check, but note that the old-format warning is available starting in MongoDB 6.0. On versions below 6.0, `validate` may return no warning even when the risk remains. Because `validate` obtains an exclusive lock on the collection, it blocks reads and writes until it completes; when run on a secondary, it may block other operations on that secondary. It is resource-intensive, so run it with caution.";
-var UNKNOWN_VERSION_ADVISORY = "Unable to determine the index format version from collStats index details. Use `validate` as a secondary check, but note that the old-format warning is available starting in MongoDB 6.0. On versions below 6.0, `validate` may return no warning even when the risk remains. Because `validate` obtains an exclusive lock on the collection, it blocks reads and writes until it completes; when run on a secondary, it may block other operations on that secondary. It is resource-intensive, so run it with caution.";
+var VALIDATE_ADVISORY = "Use `validate` as a secondary check, but note that the old-format warning is available starting in MongoDB 6.0. On versions below 6.0, `validate` may return no warning even when the risk remains. Because `validate` obtains an exclusive lock on the collection, it blocks reads and writes until it completes; when run on a secondary, it may block other operations on that secondary. It is resource-intensive, so run it with caution.";
+var LEGACY_INDEX_ADVISORY = "This index may have been created before MongoDB 4.2 and may still use a legacy unique-index key format. " + VALIDATE_ADVISORY;
+var UNKNOWN_VERSION_ADVISORY = "Unable to determine the index format version from collStats index details. " + VALIDATE_ADVISORY;
 
 if (typeof _showAll === "undefined") {
     var _showAll = false;
